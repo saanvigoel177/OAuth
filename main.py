@@ -64,4 +64,3 @@ async def verify_token(request: Request):
     response.headers["X-Request-ID"] = request_id
     response.headers["X-Process-Time"] = str(time.perf_counter() - start)
     return response
-```
