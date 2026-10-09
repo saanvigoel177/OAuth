@@ -1,66 +1,68 @@
+```python
+import os
 import time
 import uuid
 
 import jwt
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
-app = FastAPI(title="OAuth 2.0 / OIDC Token Verification Service")
+app = FastAPI()
 
 ISSUER = "https://idp.exam.local"
 AUDIENCE = "tds-hk2qkz3o.apps.exam.local"
+ALGORITHM = "RS256"
 
-# Public key transcribed from the assignment screenshot.
 PUBLIC_KEY = """-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA2okOHspNjgA+2rTLbeuY
-cxiP/hG8C6Sb9igw3yiLAA4HCnpITcbWCSelvbYGuC3EbNy4xFyF5Cbj5DHJMID
-EkryOgyd2giIIIB0UBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNLdu6A9cNteNpXc
-WyJjG2axVfmq7i6Sukr1J0wYG7xTTAvkPujS14OtsQfO3h5NepzdfXp28oNnzfw
-ed+zcLR6BcmNNo/WfJ4xyCLSf0BC0gdTgW6PdaChd1l9VDetJZVEgC5tkyvXsfI
-SI6iyrYbKR0NEBSqq4XkadEjsCs4F1RncsS4LlgnIT7GkL9Mce3b0wGLs9/7ZIX
+cxiP/hG8C6Sb9iwg3yiLAA4HCnpITcbWCSelbvbYGuc3EbNy4xFyf5Cbj5DHJMID
+EkryOgyd2giIIIBOUBj8S63uGcnRpOBh9NFatfNwheKuzsPuVNldu6A9cNteNpXc
+WyJjG2axVfmq7i6SuKr1JoWYG7xTTAvKPujSl4OtsQfO3h5NepzdfXpr28oNnzfW
+ed+zclR6BcmNNo/WVfJ4xyCLSf0BCOgdTgW6PdaChd1l9VDetJZVEgC5tkyvXsfI
+SI6iyrYbKR0NEBSqq4XkadEjsCs4F1RncsS4LlgniT7GlkL9Mce3b0wGLs9/7ZIX
 dQIDAQAB
 -----END PUBLIC KEY-----"""
 
 
-class VerifyRequest(BaseModel):
-    token: str
-
-
-@app.middleware("http")
-async def add_request_headers(request, call_next):
-    start = time.perf_counter()
-    response = await call_next(request)
-    response.headers["X-Request-ID"] = str(uuid.uuid4())
-    elapsed = max(0.0, time.perf_counter() - start)
-    response.headers["X-Process-Time"] = f"{elapsed:.6f}"
-    return response
-
-
 @app.get("/")
-def home():
-    return {
-        "service": "OAuth 2.0 / OIDC Token Verification Service",
-        "status": "ok",
-    }
+def root():
+    return {"status": "ok"}
 
 
 @app.post("/verify")
-def verify_token(body: VerifyRequest):
+async def verify_token(request: Request):
+    request_id = str(uuid.uuid4())
+    start = time.perf_counter()
+
     try:
-        claims = jwt.decode(
-            body.token,
+        body = await request.json()
+        token = body.get("token") if isinstance(body, dict) else None
+
+        if not isinstance(token, str) or not token:
+            raise ValueError("Missing token")
+
+        jwt.decode(
+            token,
             PUBLIC_KEY,
-            algorithms=["RS256"],
+            algorithms=[ALGORITHM],
             issuer=ISSUER,
             audience=AUDIENCE,
-            options={"require": ["iss", "aud", "exp"]},
+            options={
+                "require": ["exp", "iss", "aud"],
+                "verify_signature": True,
+                "verify_exp": True,
+                "verify_iss": True,
+                "verify_aud": True,
+            },
         )
-        return {
-            "valid": True,
-            "email": claims.get("email"),
-            "sub": claims.get("sub"),
-            "aud": claims.get("aud"),
-        }
-    except (jwt.PyJWTError, ValueError, TypeError):
-        return JSONResponse(status_code=401, content={"valid": False})
+
+        valid = True
+
+    except Exception:
+        valid = False
+
+    response = JSONResponse({"valid": valid}, status_code=200 if valid else 401)
+    response.headers["X-Request-ID"] = request_id
+    response.headers["X-Process-Time"] = str(time.perf_counter() - start)
+    return response
+```
